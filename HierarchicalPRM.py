@@ -6,17 +6,16 @@ from lectures.IPPerfMonitor import IPPerfMonitor
 class HierarchicalPRM(PRMBase):
     """Hierarchical PRM with a top-level visibility roadmap and sub-level planners for path validation."""
 
-    def __init__(self, _collChecker, subPlanner):
+    def __init__(self, _collChecker, subPlanner, limits=None):
         super(HierarchicalPRM, self).__init__(_collChecker)
         self.graph = nx.Graph()
-        self.subPlanner = subPlanner  # must implement planPath(startList, goalList, config)
-        self.edgePaths = dict()       # stores full paths for later reconstruction
+        self.subPlanner = subPlanner  # Must implement planPath(startList, goalList, config)
+        self.edgePaths = dict()       # Stores sub-paths for each edge
+        self.solution_path = []       # Final path from start to goal
+        self.limits = limits          # For visualization scaling
 
     def _isVisible(self, pos1, pos2, config):
-        """
-        Sichtbarkeit wird durch Subplaner bestimmt, nicht durch direkte Linienprüfung.
-        """
-        # Subplaner muss zurückgesetzt werden
+        """Check visibility via sub-planner instead of direct collision check."""
         self.subPlanner.graph.clear()
         if hasattr(self.subPlanner, 'lastGeneratedNodeNumber'):
             self.subPlanner.lastGeneratedNodeNumber = 0
@@ -34,6 +33,7 @@ class HierarchicalPRM(PRMBase):
     def _learnRoadmap(self, ntry, subConfig):
         nodeNumber = 0
         currTry = 0
+
         while currTry < ntry:
             q_pos = self._getRandomFreePosition()
             g_vis = None
@@ -52,8 +52,10 @@ class HierarchicalPRM(PRMBase):
                                 self.graph.add_edge(nodeNumber, g)
                                 self.graph.add_edge(nodeNumber, g_vis)
                                 merged = True
-                            if found: break
-                if merged: break
+                            if found:
+                                break
+                if merged:
+                    break
 
             if not merged and g_vis is None:
                 self.graph.add_node(nodeNumber, pos=q_pos, color='red', nodeType='Guard')
@@ -67,6 +69,7 @@ class HierarchicalPRM(PRMBase):
     def planPath(self, startList, goalList, config):
         self.graph.clear()
         self.edgePaths.clear()
+        self.solution_path = []  # <- reset before planning
 
         subConfig = config.get("subPlannerConfig", {})
         ntry = config.get("ntry", 40)
@@ -78,8 +81,17 @@ class HierarchicalPRM(PRMBase):
         kdTree = cKDTree(list(posList.values()))
 
         def connect_point(label, point):
-            result = kdTree.query(point, k=5)
-            for idx in result[1]:
+            if len(posList) == 0:
+                return False
+
+            k = min(5, len(posList))
+            distances, indices = kdTree.query(point, k=k)
+
+            # Wenn k == 1, dann ist indices ein einzelner int → in Liste umwandeln
+            if k == 1:
+                indices = [indices]
+
+            for idx in indices:
                 node_id = list(posList.keys())[idx]
                 if self._isVisible(point, self.graph.nodes[node_id]['pos'], subConfig):
                     self.graph.add_node(label, pos=point, color='green')
@@ -92,10 +104,10 @@ class HierarchicalPRM(PRMBase):
 
         try:
             highLevelPath = nx.shortest_path(self.graph, "start", "goal")
-        except:
+        except nx.NetworkXNoPath:
             return []
 
-        # Expand high-level path using stored edge paths
+        # Build full path from stored sub-paths
         fullPath = [checkedStartList[0]]
         for i in range(len(highLevelPath) - 1):
             u = self.graph.nodes[highLevelPath[i]]['pos']
@@ -103,23 +115,18 @@ class HierarchicalPRM(PRMBase):
             edge_key = (tuple(u), tuple(v))
             edge_key_rev = (tuple(v), tuple(u))
             if edge_key in self.edgePaths:
-                pathSegment = self.edgePaths[edge_key][1:]  # skip duplicate
+                pathSegment = self.edgePaths[edge_key][1:]
             elif edge_key_rev in self.edgePaths:
                 pathSegment = list(reversed(self.edgePaths[edge_key_rev]))[1:]
             else:
-                pathSegment = [v]  # fallback
+                pathSegment = [v]
             fullPath.extend(pathSegment)
 
+        self.solution_path = fullPath  # <- ✅ für Visualisierung
         return fullPath
 
     def learnSinglePoint(self, pos, node_id, config=None, verbose=False):
-        """
-        Fügt einen Punkt als Guard oder Connection in den Graph ein, basierend auf erreichbaren Guards via Subplaner.
-
-        Returns:
-            - result: "guard", "connection" oder "rejected"
-            - connected: Liste von verbundenen Ziel-Knoten (IDs)
-        """
+        """Try to insert a node into the high-level roadmap based on subplanner visibility."""
         if config is None:
             config = {}
 
@@ -132,7 +139,6 @@ class HierarchicalPRM(PRMBase):
                     continue
                 guard_pos = self.graph.nodes[g]['pos']
 
-                # Nutze Subplaner statt Line-of-Sight
                 path = self.subPlanner.planPath([pos], [guard_pos], config)
                 if path and len(path) >= 2:
                     self.edgePaths[(tuple(pos), tuple(guard_pos))] = path
@@ -155,4 +161,3 @@ class HierarchicalPRM(PRMBase):
             if verbose:
                 print("✖ Sichtbar zu nur einem Guard → Verworfen")
             return "rejected", []
-
