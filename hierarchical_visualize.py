@@ -38,12 +38,18 @@ def visualize_hierarchical_planning(planner, collision_checker, config_low, star
 
     # === Plot 3: Finaler Pfad ===
     ax3 = axes[2]
+    # --- 3. Finaler Pfad ---
     ax3.set_title("3. Finaler Pfad")
-    if planner.solution_path and len(planner.solution_path) >= 2:
-        xs, ys = zip(*planner.solution_path)
+
+    # 💡 Robuste Filterung gültiger 2D-Koordinaten
+    path_coords = [tuple(p) for p in planner.solution_path if isinstance(p, (list, tuple)) and len(p) == 2]
+
+    if path_coords and len(path_coords) >= 2:
+        xs, ys = zip(*path_coords)
         ax3.plot(xs, ys, color="blue", linewidth=2.5, label="Pfad")
         ax3.scatter(xs[0], ys[0], color="limegreen", s=100, label="Start")
-        ax3.scatter(xs[-1], ys[-1], color="crimson", s=100, label="Ziel")
+        ax3.scatter(xs[-1], ys[-1], color="red", s=100, label="Ziel")
+
     if hasattr(collision_checker, "drawObstacles"):
         collision_checker.drawObstacles(ax3)
     ax3.legend()
