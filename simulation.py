@@ -41,7 +41,7 @@ checker = ShapelyCollisionChecker(list(obstacles.values()))
 # --- Parameter ---
 connection_radius = 10.0
 search_margin = 5.0
-planner_type = 'basic'  # "lazy" oder "basic"
+planner_type = 'lazy'  # "lazy" oder "basic"
 planner_config = {
     "initialRoadmapSize": 40,
     "updateRoadmapSize": 20,

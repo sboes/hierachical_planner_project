@@ -9,6 +9,7 @@ from .IPPRMBase import PRMBase
 from scipy.spatial import cKDTree
 import networkx as nx
 import random
+import numpy as np
 
 from .IPPerfMonitor import IPPerfMonitor
 
@@ -62,7 +63,9 @@ class LazyPRM(PRMBase):
         # Find set of candidates to connect to sorted by distance
             result = kdTree.query(self.graph.nodes[node]['pos'],k=kNearest)
             for data in result[1]:
-                c_node = [x for x, y in self.graph.nodes(data=True) if (y['pos']==posList[data])][0]
+                c_node = [x for x, y in self.graph.nodes(data=True)
+                if np.array_equal(np.asarray(y['pos']), np.asarray(posList[data]))][0]
+
                 if node!=c_node:
                     if (node, c_node) not in self.collidingEdges:
                         self.graph.add_edge(node,c_node)
