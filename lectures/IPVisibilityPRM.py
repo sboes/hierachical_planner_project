@@ -6,10 +6,11 @@ This code is part of the course "Introduction to robot path planning" (Author: B
 License is based on Creative Commons: Attribution-NonCommercial 4.0 International (CC BY-NC 4.0) (pls. check: http://creativecommons.org/licenses/by-nc/4.0/)
 """
 
-from IPPRMBase import PRMBase
+from lectures.IPPRMBase import PRMBase
 import networkx as nx
 from scipy.spatial import cKDTree
-from IPPerfMonitor import IPPerfMonitor
+from lectures.IPPerfMonitor import IPPerfMonitor
+import numpy as np
 
 class VisibilityStatsHandler():
     
@@ -51,10 +52,10 @@ class VisPRM(PRMBase):
         
             # every connected component represents one guard
             merged = False
-            for comp in nx.connected_components(self.graph): # Impliciteley represents G_vis
+            for comp in nx.connected_components(self.graph): # Für jeden Knoten in der Komponente
                 found = False
                 merged = False
-                for g in comp: # connected components consists of guards and connection: only test nodes of type 'Guards'
+                for g in comp: # für jeden Gard in der Komponente (ein Guard ist ein Knoten der Sichtbarkeit repräsentiert)
                     if self.graph.nodes()[g]['nodeType'] == 'Guard':
                         if self.statsHandler:
                             self.statsHandler.addVisTest(nodeNumber, g)
@@ -108,26 +109,53 @@ class VisPRM(PRMBase):
 
         # 3. find connection of start and goal to roadmap
         # find nearest, collision-free connection between node on graph and start
-        posList = nx.get_node_attributes(self.graph,'pos')
-        kdTree = cKDTree(list(posList.values()))
-        
-        result = kdTree.query(checkedStartList[0],k=5)
-        for node in result[1]:
-            if not self._collisionChecker.lineInCollision(checkedStartList[0],self.graph.nodes()[list(posList.keys())[node]]['pos']):
-                 self.graph.add_node("start", pos=checkedStartList[0], color='lightgreen')
-                 self.graph.add_edge("start", list(posList.keys())[node])
-                 break
+        # 3. find connection of start and goal to roadmap
+        posList = nx.get_node_attributes(self.graph, 'pos')
 
-        result = kdTree.query(checkedGoalList[0],k=5)
-        for node in result[1]:
-            if not self._collisionChecker.lineInCollision(checkedGoalList[0],self.graph.nodes()[list(posList.keys())[node]]['pos']):
-                 self.graph.add_node("goal", pos=checkedGoalList[0], color='lightgreen')
-                 self.graph.add_edge("goal", list(posList.keys())[node])
-                 break
-
-        try:
-            path = nx.shortest_path(self.graph,"start","goal")
-        except:
+        # ❗ Sicherstellen, dass überhaupt Knoten vorhanden sind
+        if not posList:
+            print("❌ Keine Knoten im Graph – Roadmap konnte nicht erzeugt werden.")
             return []
+
+        kdTree = cKDTree(list(posList.values()))
+
+        # --- Start anbinden ---
+        start_connected = False
+        result = kdTree.query(checkedStartList[0], k=min(5, len(posList)))
+        for idx in np.atleast_1d(result[1]):
+            if idx >= len(posList):
+                continue
+            node_id = list(posList.keys())[idx]
+            if not self._collisionChecker.lineInCollision(checkedStartList[0], self.graph.nodes[node_id]['pos']):
+                self.graph.add_node("start", pos=checkedStartList[0], color='lightgreen')
+                self.graph.add_edge("start", node_id)
+                start_connected = True
+                break
+
+        # --- Ziel anbinden ---
+        goal_connected = False
+        result = kdTree.query(checkedGoalList[0], k=min(5, len(posList)))
+        for idx in np.atleast_1d(result[1]):
+            if idx >= len(posList):
+                continue
+            node_id = list(posList.keys())[idx]
+            if not self._collisionChecker.lineInCollision(checkedGoalList[0], self.graph.nodes[node_id]['pos']):
+                self.graph.add_node("goal", pos=checkedGoalList[0], color='lightgreen')
+                self.graph.add_edge("goal", node_id)
+                goal_connected = True
+                break
+
+        if not (start_connected and goal_connected):
+            print("❌ Start oder Ziel konnte nicht mit der Roadmap verbunden werden.")
+            return []
+
+        # --- Kürzesten Pfad suchen ---
+        try:
+            path = nx.shortest_path(self.graph, "start", "goal")
+        except nx.NetworkXNoPath:
+            print("❌ Kein Pfad zwischen Start und Ziel.")
+            return []
+
         return path
+
         

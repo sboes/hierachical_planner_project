@@ -1,20 +1,17 @@
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, Polygon as MplPolygon
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon as ShapelyPolygon, LineString
+from shapely.ops import unary_union
 import numpy as np
+import random
+
 from environment import get_all_scenes
 from lectures.IPVISLazyPRM import lazyPRMVisualize
 from lectures.IPVISBasicPRM import basicPRMVisualize
 from lectures.IPLazyPRM import LazyPRM
 from lectures.IPBasicPRM import BasicPRM
-import random
-from matplotlib.patches import Polygon as MplPolygon
-from shapely.geometry import Point, LineString
-from shapely.geometry import Polygon as ShapelyPolygon
-from shapely.ops import unary_union
+from matplotlib.widgets import Button
 
-
-# --- Shapely Collision Checker ---
 # --- Shapely Collision Checker ---
 class ShapelyCollisionChecker:
     def __init__(self, obstacles):
@@ -92,22 +89,19 @@ def clamp_bounds(min_x, max_x, min_y, max_y, limits):
     clamped_max_y = min(max_y, limits[1][1])
     return clamped_min_x, clamped_max_x, clamped_min_y, clamped_max_y
 
-
 def run_local_planner(p1, p2, bounds):
     if planner_type == 'lazy':
         planner = LazyPRM(checker)
         planner.setSamplingBounds(bounds)
         path = planner.planPath([p1], [p2], planner_config)
         lazyPRMVisualize(planner, path, ax=ax)
-        num_failures = len(planner.collidingEdges)
-        num_success = len(planner.nonCollidingEdges)
         debug_stats.append({
             'type': 'LazyPRM',
             'start': p1,
             'goal': p2,
             'success': path != [],
-            'collidingEdges': num_failures,
-            'validEdges': num_success
+            'collidingEdges': len(planner.collidingEdges),
+            'validEdges': len(planner.nonCollidingEdges)
         })
     else:
         planner = BasicPRM(checker)
@@ -123,33 +117,80 @@ def run_local_planner(p1, p2, bounds):
         })
     return path
 
+# --- Verbindungslogik mit Rücknahme ---
+def process_guard_connection(center_id, center_pos):
+    global guards, visibility_polygons
 
-def try_hierarchical_connection(current_pos):
-    for other_id, other_pos in guards:
-        if np.linalg.norm(np.array(current_pos) - np.array(other_pos)) <= connection_radius:
-            if current_pos == other_pos:
-                continue
+    polygon_points = compute_visibility_polygon_raycast(center_pos, list(obstacles.values()))
+    new_poly = ShapelyPolygon(polygon_points)
 
-            min_x = min(current_pos[0], other_pos[0]) - search_margin
-            max_x = max(current_pos[0], other_pos[0]) + search_margin
-            min_y = min(current_pos[1], other_pos[1]) - search_margin
-            max_y = max(current_pos[1], other_pos[1]) + search_margin
+    if visibility_polygons:
+        union_prev = unary_union(visibility_polygons).buffer(0.01)
+        new_area = new_poly.area
+        added_area = new_poly.difference(union_prev).area
+        print(f"→ Fläche: total={new_area:.2f}, neu={added_area:.2f}, Anteil={(added_area / new_area) * 100:.2f}%")
+        if added_area < 0.2 or (added_area / new_area) < 0.07:
+            print("✖ Guard deckt keine neue Fläche ab – verworfen.")
+            return False
 
-            min_x, max_x, min_y, max_y = clamp_bounds(min_x, max_x, min_y, max_y, limits)
+    min_x = center_pos[0] - search_margin
+    max_x = center_pos[0] + search_margin
+    min_y = center_pos[1] - search_margin
+    max_y = center_pos[1] + search_margin
+    min_x, max_x, min_y, max_y = clamp_bounds(min_x, max_x, min_y, max_y, limits)
+    bounds = ((min_x, max_x), (min_y, max_y))
 
-            # Visualisiere lokale Region
-            ax.add_patch(Rectangle((min_x, min_y), max_x - min_x, max_y - min_y,
-                                   edgecolor='blue', facecolor='none', linestyle='--', linewidth=1))
+    neighbor_guards = [(gid, pos) for gid, pos in guards if gid != center_id and
+                       min_x <= pos[0] <= max_x and min_y <= pos[1] <= max_y]
+    if not neighbor_guards:
+        if len(guards) == 0:
+            print("✔ Kein Nachbar, aber erster Guard – wird behalten")
+            visibility_polygons.append(new_poly)
+            guards.append((center_id, center_pos))
+            circle = plt.Circle(center_pos, connection_radius, color=colors[center_id % len(colors)], alpha=0.3)
+            ax.add_patch(circle)
+            ax.plot(*center_pos, 'ko')
+            return True
+        else:
+            print("✖ Keine benachbarten Guards im Suchbereich")
+            return False
 
-            print(f"→ Verbindungsversuch zwischen {current_pos} und {other_pos}")
-            path = run_local_planner(current_pos, other_pos, ((min_x, max_x), (min_y, max_y)))
-            if path:
-                print("✔ Verbindung hergestellt")
-            else:
-                print("✖ Verbindung fehlgeschlagen")
+    planner = LazyPRM(checker) if planner_type == 'lazy' else BasicPRM(checker)
+    planner.setSamplingBounds(bounds)
+    success = False
+    valid_paths = []
+
+    for neighbor_id, neighbor_pos in neighbor_guards:
+        path = planner.planPath([center_pos], [neighbor_pos], planner_config)
+
+        # Sicherstellen, dass path ein sinnvoller Pfad ist (Liste von Koordinaten)
+        if isinstance(path, list) and all(
+                isinstance(p, (list, tuple)) and len(p) == 2 and isinstance(p[0], (int, float)) for p in path
+        ):
+            valid_paths.append((neighbor_id, path))
+            success = True
+
+    if success:
+        visibility_polygons.append(new_poly)
+        guards.append((center_id, center_pos))
+        circle = plt.Circle(center_pos, connection_radius, color=colors[center_id % len(colors)], alpha=0.3)
+        ax.add_patch(circle)
+        ax.plot(*center_pos, 'ko')
+        for _, path in valid_paths:
+            try:
+                x_vals, y_vals = zip(*path)
+                ax.plot(x_vals, y_vals, 'b-', linewidth=1.5)
+            except Exception as e:
+                print(f"⚠ Fehler beim Zeichnen eines Pfads: {e}")
+        fig.canvas.draw()  # ← HINZUFÜGEN!
+        return True
+
+    else:
+        print("✖ Keine gültige Verbindung – Guard verworfen")
+        return False
 
 
-# --- Interaktive Klickfunktion ---
+# --- Klick-Interaktion ---
 def on_click(event):
     global node_id
     if event.inaxes != ax or event.button != 1:
@@ -157,39 +198,62 @@ def on_click(event):
 
     pos = (float(event.xdata), float(event.ydata))
     print(f"\n→ Neuer Guard bei {pos}")
+    success = process_guard_connection(node_id, pos)
+    if success:
+        node_id += 1
+        fig.canvas.draw()
 
-    polygon_points = compute_visibility_polygon_raycast(pos, list(obstacles.values()))
-    new_poly = ShapelyPolygon(polygon_points)
+# --- Button-Funktionen ---
+start_point = (limits[0][0] + 1, limits[1][0] + 1)
+goal_point = (limits[0][1] - 1, limits[1][1] - 1)
 
-    if visibility_polygons:
-        union_prev = unary_union(visibility_polygons).buffer(0.01)
-        new_area = new_poly.area
-        added_area = new_poly.difference(union_prev).area
-
-        print(f"→ Fläche: total={new_area:.2f}, neu={added_area:.2f}, Anteil={(added_area/new_area)*100:.2f}%")
-
-        if added_area < 0.2 or (added_area / new_area) < 0.07:
-            ax.plot(*pos, marker='x', color='gray', alpha=0.4)
-            fig.canvas.draw()
-            return
-
-    # Sichtbarkeitsbereich (als Kreis angedeutet)
-    circle = plt.Circle(pos, connection_radius, color=colors[node_id % len(colors)], alpha=0.3)
-    ax.add_patch(circle)
-    ax.plot(*pos, 'ko')
-
-    visibility_polygons.append(new_poly)
-    guards.append((node_id, pos))
-    try_hierarchical_connection(pos)
-
-    node_id += 1
+def generate_random_points(event):
+    global node_id
+    print("\n→ Generiere zufällige Punkte")
+    attempts = 0
+    while attempts < 20 and node_id < 100:
+        x = random.uniform(*limits[0])
+        y = random.uniform(*limits[1])
+        if checker.pointInCollision((x, y)):
+            continue
+        success = process_guard_connection(node_id, (x, y))
+        if success:
+            node_id += 1
+        attempts += 1
     fig.canvas.draw()
 
+def find_all_connections(event):
+    print("\n→ Finde alle Verbindungen")
+    fig.canvas.draw()
 
+def solve_from_start_to_goal(event):
+    print("\n→ Starte Pfadsuche von Start zu Ziel")
+    ax.plot(*start_point, 'go', label='Start')
+    ax.plot(*goal_point, 'ro', label='Ziel')
+    bounds = ((min(start_point[0], goal_point[0]), max(start_point[0], goal_point[0])),
+              (min(start_point[1], goal_point[1]), max(start_point[1], goal_point[1])))
+    path = run_local_planner(start_point, goal_point, bounds)
+    if path:
+        x_vals, y_vals = zip(*path)
+        ax.plot(x_vals, y_vals, 'r-', linewidth=2)
+    fig.canvas.draw()
+
+# --- Buttons Setup ---
+button_ax1 = plt.axes([0.7, 0.05, 0.25, 0.04])
+button_ax2 = plt.axes([0.7, 0.10, 0.25, 0.04])
+button_ax3 = plt.axes([0.7, 0.15, 0.25, 0.04])
+btn_generate = Button(button_ax1, 'Generate Random Points')
+btn_connect = Button(button_ax2, 'Find Connections')
+btn_solve = Button(button_ax3, 'Solve Start → Goal')
+btn_generate.on_clicked(generate_random_points)
+btn_connect.on_clicked(find_all_connections)
+btn_solve.on_clicked(solve_from_start_to_goal)
+
+plt.subplots_adjust(bottom=0.25)
 fig.canvas.mpl_connect('button_press_event', on_click)
 plt.show()
 
-# --- Debug-Stats am Ende ausgeben ---
+# --- Debug Ausgabe ---
 print("\n--- Debugging Summary ---")
 for i, entry in enumerate(debug_stats):
     print(f"[{i+1}] {entry['type']} | Success: {entry['success']} | Start: {entry['start']} → Goal: {entry['goal']}")
@@ -197,5 +261,3 @@ for i, entry in enumerate(debug_stats):
         print(f"    Colliding Edges: {entry['collidingEdges']} | Valid Edges: {entry['validEdges']}")
     else:
         print(f"    Nodes attempted: {entry['numNodes']}")
-
-
