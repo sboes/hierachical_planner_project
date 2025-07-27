@@ -35,11 +35,31 @@ def try_connect_hierarchical(p1, p2, checker, subplanner, prm_config, ax_graph):
 
     print("✖ Keine Sichtverbindung, versuche LazyPRM...")
 
+    # --- Rechteck um p1 und p2 berechnen ---
+    margin = 5.0  # Abstand zum Rand
+    min_x = min(p1[0], p2[0]) - margin
+    max_x = max(p1[0], p2[0]) + margin
+    min_y = min(p1[1], p2[1]) - margin
+    max_y = max(p1[1], p2[1]) + margin
+
+    # --- Rechteck zeichnen ---
+    rect = plt.Rectangle((min_x, min_y), max_x - min_x, max_y - min_y,
+                         edgecolor='blue', facecolor='none', linestyle='--', linewidth=1.0, alpha=0.5)
+    ax_graph.add_patch(rect)
+
+    # --- Sampling-Filterfunktion definieren ---
+    def sampling_filter(sample):
+        return min_x <= sample[0] <= max_x and min_y <= sample[1] <= max_y
+
+    # Subplanner zurücksetzen
     subplanner.graph.clear()
     if hasattr(subplanner, 'lastGeneratedNodeNumber'):
         subplanner.lastGeneratedNodeNumber = 0
     if hasattr(subplanner, 'collidingEdges'):
         subplanner.collidingEdges.clear()
+
+    # Sampling-Filter in Konfiguration übergeben
+    prm_config["samplingFilter"] = sampling_filter
 
     path = subplanner.planPath([p1], [p2], prm_config)
 
@@ -56,6 +76,7 @@ def try_connect_hierarchical(p1, p2, checker, subplanner, prm_config, ax_graph):
         print("✖ Verbindung nicht möglich")
 
     return False
+
 
 # --- Sichtfeldberechnung ---
 def compute_visibility_polygon_raycast(center, obstacles, max_radius=25.0, steps=360, step_size=0.5):
