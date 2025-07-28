@@ -131,7 +131,7 @@ class LazyPRM(PRMBase):
         self._buildRoadmap(config["initialRoadmapSize"], config["kNearest"])
 
         maxTry = 0
-        print("📦 Subplanner-SamplingBounds:", self.samplingBounds)
+        # print("📦 Subplanner-SamplingBounds:", self.samplingBounds)
         while maxTry < config["maxIterations"]:
             try:
                 path = nx.shortest_path(self.graph, "start", "goal")
