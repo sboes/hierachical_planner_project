@@ -58,6 +58,36 @@ basic_config = {
 
 planner = HierarchicalPRM(checker, LazyPRM, lazy_config)
 planner.latest_subplanner = None  # Für Visualisierung
+planner.latest_bounds = None      # Für Sichtbarkeit des Suchraums
+
+original_localSubplan = planner._localSubplan
+
+def patched_localSubplan(start, goal):
+    margin = 0.5
+    min_x = min(start[0], goal[0]) - margin
+    max_x = max(start[0], goal[0]) + margin
+    min_y = min(start[1], goal[1]) - margin
+    max_y = max(start[1], goal[1]) + margin
+
+    planner.latest_bounds = [(min_x, max_x), (min_y, max_y)]
+    print(f"📦 Suchraum für Subplanner: x=[{min_x}, {max_x}], y=[{min_y}, {max_y}]")
+
+    old_limits = planner._collisionChecker.getEnvironmentLimits
+    planner._collisionChecker.getEnvironmentLimits = lambda: [(min_x, max_x), (min_y, max_y)]
+
+    subplanner = planner.subplanner_class(planner._collisionChecker)
+    subplanner.planPath([start], [goal], planner.subplanner_config)
+    planner.latest_subplanner = subplanner
+
+    planner._collisionChecker.getEnvironmentLimits = old_limits
+
+    try:
+        path = nx.shortest_path(subplanner.graph, "start", "goal")
+        return [subplanner.graph.nodes[n]['pos'] for n in path]
+    except:
+        return None
+
+planner._localSubplan = patched_localSubplan
 
 # --- VISUALISIERUNG ---
 fig, ax = plt.subplots(figsize=(8, 8))
@@ -96,6 +126,12 @@ def draw():
                 p1 = sub_pos[u]
                 p2 = sub_pos[v]
                 ax.plot([p1[0], p2[0]], [p1[1], p2[1]], color='blue', linestyle='--', alpha=0.5)
+
+    if planner.latest_bounds:
+        (min_x, max_x), (min_y, max_y) = planner.latest_bounds
+        ax.plot([min_x, max_x, max_x, min_x, min_x],
+                [min_y, min_y, max_y, max_y, min_y],
+                color='orange', linestyle='dotted', linewidth=2)
 
     if solution_path:
         for i in range(len(solution_path) - 1):
@@ -152,17 +188,11 @@ def on_step(event):
             planner.graph.add_edge(g, candidate)
             connections_made += 1
         else:
-            subplanner = planner.subplanner_class(planner._collisionChecker)
-            subplanner.planPath([pos_g], [planner.graph.nodes[candidate]['pos']], planner.subplanner_config)
-            planner.latest_subplanner = subplanner
-            try:
-                path = nx.shortest_path(subplanner.graph, "start", "goal")
-                path_coords = [subplanner.graph.nodes[n]['pos'] for n in path]
-                planner.subplanner_results[(g, candidate)] = path_coords
+            path = planner._localSubplan(pos_g, planner.graph.nodes[candidate]['pos'])
+            if path and len(path) > 1:
+                planner.subplanner_results[(g, candidate)] = path
                 planner.graph.add_edge(g, candidate)
                 connections_made += 1
-            except:
-                pass
     connection_index += 1
     draw()
 
