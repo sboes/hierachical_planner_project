@@ -62,32 +62,41 @@ planner.latest_bounds = None      # Für Sichtbarkeit des Suchraums
 
 original_localSubplan = planner._localSubplan
 
-def patched_localSubplan(start, goal):
-    margin = 0.5
-    min_x = min(start[0], goal[0]) - margin
-    max_x = max(start[0], goal[0]) + margin
-    min_y = min(start[1], goal[1]) - margin
-    max_y = max(start[1], goal[1]) + margin
 
-    planner.latest_bounds = [(min_x, max_x), (min_y, max_y)]
-    print(f"📦 Suchraum für Subplanner: x=[{min_x}, {max_x}], y=[{min_y}, {max_y}]")
+def _localSubplan(self, start, goal):
+    subplanner = self.subplanner_class(self._collisionChecker)
+    environment_limits = self._collisionChecker.getEnvironmentLimits()
 
-    old_limits = planner._collisionChecker.getEnvironmentLimits
-    planner._collisionChecker.getEnvironmentLimits = lambda: [(min_x, max_x), (min_y, max_y)]
+    # Definiere maximalen Rand basierend auf Umgebung
+    max_margin_x = (environment_limits[0][1] - environment_limits[0][0]) / 2
+    max_margin_y = (environment_limits[1][1] - environment_limits[1][0]) / 2
+    max_margin = min(max_margin_x, max_margin_y)
 
-    subplanner = planner.subplanner_class(planner._collisionChecker)
-    subplanner.planPath([start], [goal], planner.subplanner_config)
-    planner.latest_subplanner = subplanner
+    margin = 2.0
+    step = 2.0
 
-    planner._collisionChecker.getEnvironmentLimits = old_limits
+    while margin <= max_margin:
+        min_x = max(min(start[0], goal[0]) - margin, environment_limits[0][0])
+        max_x = min(max(start[0], goal[0]) + margin, environment_limits[0][1])
+        min_y = max(min(start[1], goal[1]) - margin, environment_limits[1][0])
+        max_y = min(max(start[1], goal[1]) + margin, environment_limits[1][1])
 
-    try:
-        path = nx.shortest_path(subplanner.graph, "start", "goal")
-        return [subplanner.graph.nodes[n]['pos'] for n in path]
-    except:
-        return None
+        # Sampling-Bereich setzen
+        self.subplanner_config["samplingBounds"] = [(min_x, max_x), (min_y, max_y)]
 
-planner._localSubplan = patched_localSubplan
+        # Plane Pfad
+        subplanner.planPath([start], [goal], self.subplanner_config)
+        self.latest_subplanner = subplanner
+
+        try:
+            path = nx.shortest_path(subplanner.graph, "start", "goal")
+            return [subplanner.graph.nodes[n]['pos'] for n in path]
+        except nx.NetworkXNoPath:
+            margin += step  # Erhöhe Margin und versuche es erneut
+
+    print("❌ Subplanner konnte keinen Pfad finden – maximale Ausdehnung erreicht.")
+    return None
+
 
 # --- VISUALISIERUNG ---
 fig, ax = plt.subplots(figsize=(8, 8))

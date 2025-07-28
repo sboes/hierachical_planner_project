@@ -22,6 +22,7 @@ class LazyPRM(PRMBase):
         self.lastGeneratedNodeNumber = 0
         self.collidingEdges = []
         self.nonCollidingEdges =[]
+        self.samplingBounds = None  # 🆕 wichtig!
 
     def setSamplingBounds(self, bounds):
         """bounds = ((x_min, x_max), (y_min, y_max))"""
@@ -96,54 +97,55 @@ class LazyPRM(PRMBase):
                                                                                           
             
         return False
-        
-    @IPPerfMonitor   
+
+    @IPPerfMonitor
     def planPath(self, startList, goalList, config):
         """
-        
         Args:
             startList (array): start position in planning space
             goalList (array) : goal position in planning space
-            config (dict): dictionary with the needed information about the configuration options
-            
-        Example:
-        
-            config["initialRoadmapSize"] = 40 # number of nodes of first roadmap
-            config["updateRoadmapSize"]  = 20 # number of nodes to add if there is no connection from start to end
-            config["kNearest"] = 5 # number of nodes to connect to during setup
-            config["maxIterations"] = 40 # number of iterations trying to refine the roadmap
-            
+            config (dict): dictionary with roadmap configuration
+
+        Optional:
+            config["samplingBounds"]: ((x_min, x_max), (y_min, y_max))
         """
         # 0. reset
         self.graph.clear()
         self.lastGeneratedNodeNumber = 0
         self.collidingEdges = []
-        
-        # 1. check start and goal whether collision free (s. BaseClass)
-        checkedStartList, checkedGoalList = self._checkStartGoal(startList,goalList)
-        
+
+        if "samplingBounds" in config:
+            self.setSamplingBounds(config["samplingBounds"])
+        elif self.samplingBounds is None:
+            # Falls nichts gesetzt wurde, nimm globale Limits (z. B. 0–22)
+            self.setSamplingBounds(((0, 22), (0, 22)))  # oder beliebig andere Default-Grenzen
+
+        # 1. check start and goal
+        checkedStartList, checkedGoalList = self._checkStartGoal(startList, goalList)
+
         # 2. add start and goal to graph
         self.graph.add_node("start", pos=checkedStartList[0])
         self.graph.add_node("goal", pos=checkedGoalList[0])
-        
+
         # 3. build initial roadmap
         self._buildRoadmap(config["initialRoadmapSize"], config["kNearest"])
-        
+
         maxTry = 0
-        while maxTry < config["maxIterations"]: 
+        print("📦 Subplanner-SamplingBounds:", self.samplingBounds)
+        while maxTry < config["maxIterations"]:
             try:
-                path = nx.shortest_path(self.graph,"start","goal")
+                path = nx.shortest_path(self.graph, "start", "goal")
             except:
                 self._buildRoadmap(config["updateRoadmapSize"], config["kNearest"])
                 maxTry += 1
                 continue
-              
+
             if self._checkForCollisionAndUpdate(path):
                 continue
             else:
-                #print "Found solution"
                 return path
-            
+
         return []
+
 
     
