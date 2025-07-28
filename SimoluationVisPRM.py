@@ -1,4 +1,4 @@
-import matplotlib.pyplot as plt
+'''import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon as MplPolygon
 from shapely.geometry import Point, LineString
 import networkx as nx
@@ -101,4 +101,5 @@ def on_click(event):
     plt.draw()
 
 fig.canvas.mpl_connect('button_press_event', on_click)
-plt.show()
+plt.show()'''
+
