@@ -57,6 +57,7 @@ basic_config = {
 }
 
 planner = HierarchicalPRM(checker, LazyPRM, lazy_config)
+planner.latest_subplanner = None  # Für Visualisierung
 
 # --- VISUALISIERUNG ---
 fig, ax = plt.subplots(figsize=(8, 8))
@@ -86,6 +87,15 @@ def draw():
             x0, y0 = path[i]
             x1, y1 = path[i + 1]
             ax.plot([x0, x1], [y0, y1], 'g--', linewidth=2, alpha=0.7)
+
+    if planner.latest_subplanner:
+        sub_pos = nx.get_node_attributes(planner.latest_subplanner.graph, 'pos')
+        nx.draw_networkx_nodes(planner.latest_subplanner.graph, sub_pos, node_size=20, node_color='blue', ax=ax)
+        for u, v in planner.latest_subplanner.graph.edges():
+            if u in sub_pos and v in sub_pos:
+                p1 = sub_pos[u]
+                p2 = sub_pos[v]
+                ax.plot([p1[0], p2[0]], [p1[1], p2[1]], color='blue', linestyle='--', alpha=0.5)
 
     if solution_path:
         for i in range(len(solution_path) - 1):
@@ -142,11 +152,17 @@ def on_step(event):
             planner.graph.add_edge(g, candidate)
             connections_made += 1
         else:
-            path = planner._localSubplan(pos_g, planner.graph.nodes[candidate]['pos'])
-            if path:
-                planner.subplanner_results[(g, candidate)] = path
+            subplanner = planner.subplanner_class(planner._collisionChecker)
+            subplanner.planPath([pos_g], [planner.graph.nodes[candidate]['pos']], planner.subplanner_config)
+            planner.latest_subplanner = subplanner
+            try:
+                path = nx.shortest_path(subplanner.graph, "start", "goal")
+                path_coords = [subplanner.graph.nodes[n]['pos'] for n in path]
+                planner.subplanner_results[(g, candidate)] = path_coords
                 planner.graph.add_edge(g, candidate)
                 connections_made += 1
+            except:
+                pass
     connection_index += 1
     draw()
 
