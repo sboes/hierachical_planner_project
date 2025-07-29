@@ -55,10 +55,6 @@ class HierarchicalPRM(PRMBase):
         attempts = 0
         max_attempts = ntry * 10
 
-        env_limits = self._collisionChecker.getEnvironmentLimits()
-        min_x, max_x = env_limits[0]
-        min_y, max_y = env_limits[1]
-
         # === 1. Guards erzeugen ===
         while len(self.guards) < ntry and attempts < max_attempts:
             attempts += 1
@@ -114,7 +110,6 @@ class HierarchicalPRM(PRMBase):
                     self.graph.add_edge(g, candidate)
                     connections_made += 1
                 else:
-                    # Subplaner nur temporär aufrufen und nur bei Erfolg verwenden
                     try:
                         path = self._localSubplan(pos_g, pos_c)
                         if path:
@@ -123,33 +118,17 @@ class HierarchicalPRM(PRMBase):
                             connections_made += 1
                         else:
                             print(f"⚠️ Subplaner konnte keinen Pfad finden zwischen {g} <-> {candidate}")
-                            # Kein Eintrag, keine Kante – Roadmap bleibt stabil
                     except Exception as e:
                         print(f"❌ Subplanner Exception für {g} <-> {candidate}: {e}")
-                        # Sicherheitshalber komplett ignorieren, keine Änderungen übernehmen
 
     def _localSubplan(self, start, goal):
         subplanner = self.subplanner_class(self._collisionChecker)
-        env_limits = self._collisionChecker.getEnvironmentLimits()
-        min_env_x, max_env_x = env_limits[0]
-        min_env_y, max_env_y = env_limits[1]
 
-        margin = self.subplanner_config.get("margin", None)
-
-        if margin is None:
-            min_x, max_x = min_env_x, max_env_x
-            min_y = min_env_y
-            max_y = max_env_y
-        else:
-            min_x = max(min(start[0], goal[0]) - margin, min_env_x)
-            max_x = min(max(start[0], goal[0]) + margin, max_env_x)
-            min_y = max(min(start[1], goal[1]) - margin, min_env_y)
-            max_y = min(max(start[1], goal[1]) + margin, max_env_y)
-
-        print(f"📦 Subplanner SamplingBounds: x=[{min_x}, {max_x}], y=[{min_y}, {max_y}]")
-
+        # Wichtig: SamplingBounds auf vollen Konfigurationsraum setzen
         if hasattr(subplanner, 'setSamplingBounds'):
-            subplanner.setSamplingBounds(((min_x, max_x), (min_y, max_y)))
+            subplanner.setSamplingBounds(self._collisionChecker.limits)
+
+        print("📦 Subplanner SamplingBounds:", self._collisionChecker.limits)
 
         subplanner.planPath([start], [goal], self.subplanner_config)
         self.latest_subplanner = subplanner
@@ -162,7 +141,6 @@ class HierarchicalPRM(PRMBase):
             path = nx.shortest_path(subplanner.graph, "start", "goal")
             path_coords = [subplanner.graph.nodes[n]['pos'] for n in path]
 
-            # 🔍 NEU: Kollisionstest jedes Pfadsegments
             for i in range(len(path_coords) - 1):
                 p1 = path_coords[i]
                 p2 = path_coords[i + 1]
@@ -202,9 +180,15 @@ class HierarchicalPRM(PRMBase):
             print("❌ Start oder Ziel konnte nicht mit einem Guard verbunden werden.")
             return []
 
+        # Erstelle einen neuen Graphen mit allen Guards als Knoten
         subgraph = nx.Graph()
+        for node_id in self.guards:
+            subgraph.add_node(node_id, **self.graph.nodes[node_id])
+
+        # Füge die Kanten aus den Subplanner-Ergebnissen hinzu
         for (g1, g2), path in self.subplanner_results.items():
-            subgraph.add_edge(g1, g2)
+            if g1 in self.guards and g2 in self.guards:
+                subgraph.add_edge(g1, g2)
 
         try:
             guard_path = nx.shortest_path(subgraph, start_guard, goal_guard)

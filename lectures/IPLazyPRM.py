@@ -5,43 +5,28 @@ This code is part of the course "Introduction to robot path planning" (Author: B
 License is based on Creative Commons: Attribution-NonCommercial 4.0 International (CC BY-NC 4.0) (pls. check: http://creativecommons.org/licenses/by-nc/4.0/)
 """
 
-from .IPPRMBase import PRMBase
+from lectures.IPPRMBase import PRMBase
 from scipy.spatial import cKDTree
 import networkx as nx
 import random
 import numpy as np
 
-from .IPPerfMonitor import IPPerfMonitor
+from lectures.IPPerfMonitor import IPPerfMonitor
+
 
 class LazyPRM(PRMBase):
 
     def __init__(self, _collChecker):
         super(LazyPRM, self).__init__(_collChecker)
-        
+
         self.graph = nx.Graph()
         self.lastGeneratedNodeNumber = 0
         self.collidingEdges = []
-        self.nonCollidingEdges =[]
-
-    def setSamplingBounds(self, bounds):
-        """bounds = ((x_min, x_max), (y_min, y_max))"""
-        self.samplingBounds = bounds
-
-    def _getRandomPosition(self):
-        if hasattr(self, 'samplingBounds'):
-            (x_min, x_max), (y_min, y_max) = self.samplingBounds
-        else:
-            (x_min, x_max), (y_min, y_max) = (0, 22), (0, 22)  # Default fallback
-
-        for _ in range(100):
-            pos = [random.uniform(x_min, x_max), random.uniform(y_min, y_max)]
-            if not self._collisionChecker.pointInCollision(pos):
-                return pos
-        raise RuntimeError("Could not find a collision-free sample in bounds")
+        self.nonCollidingEdges = []
 
     @IPPerfMonitor
     def _buildRoadmap(self, numNodes, kNearest):
-        
+
         # generate #numNodes nodes
         addedNodes = []
         for i in range(numNodes):
@@ -50,51 +35,47 @@ class LazyPRM(PRMBase):
             addedNodes.append(self.lastGeneratedNodeNumber)
             self.lastGeneratedNodeNumber += 1
 
-
         # for every node in graph find nearest neigbhours
-        posList = list(nx.get_node_attributes(self.graph,'pos').values())
-        #print posList
+        posList = list(nx.get_node_attributes(self.graph, 'pos').values())
+        # print posList
         kdTree = cKDTree(posList)
-        
-        # to see when _buildRoadmap has to be called again
-        #print addedNodes
-        for node in addedNodes:
-        #for node in self.graph.nodes():
-        # Find set of candidates to connect to sorted by distance
-            result = kdTree.query(self.graph.nodes[node]['pos'],k=kNearest)
-            for data in result[1]:
-                c_node = [x for x, y in self.graph.nodes(data=True)
-                if np.array_equal(np.asarray(y['pos']), np.asarray(posList[data]))][0]
 
-                if node!=c_node:
+        # to see when _buildRoadmap has to be called again
+        # print addedNodes
+        for node in addedNodes:
+            # for node in self.graph.nodes():
+            # Find set of candidates to connect to sorted by distance
+            result = kdTree.query(self.graph.nodes[node]['pos'], k=kNearest)
+            for data in result[1]:
+                c_node = [x for x, y in self.graph.nodes(data=True) if np.array_equal(y['pos'], posList[data])][0]
+                if node != c_node:
                     if (node, c_node) not in self.collidingEdges:
-                        self.graph.add_edge(node,c_node)
+                        self.graph.add_edge(node, c_node)
                     else:
                         continue
-                        #print "not adding already checked colliding edge"
-    
+                        # print "not adding already checked colliding edge"
+
     @IPPerfMonitor
-    def _checkForCollisionAndUpdate(self,path):
+    def _checkForCollisionAndUpdate(self, path):
         # first check all nodes
         for nodeNumber in path:
             if self._collisionChecker.pointInCollision(self.graph.nodes[nodeNumber]['pos']):
                 self.graph.remove_node(nodeNumber)
-                #print "Colliding Node"
+                # print "Colliding Node"
                 return True
-        
+
         # check all path segments
-        for elem in zip(path,path[1:]):
-            #print elem
+        for elem in zip(path, path[1:]):
+            # print elem
             x = elem[0]
             y = elem[1]
-            if self._collisionChecker.lineInCollision(self.graph.nodes()[x]['pos'],self.graph.nodes()[y]['pos']):
-                self.graph.remove_edge(x,y)
-                self.collidingEdges.append((x,y))
+            if self._collisionChecker.lineInCollision(self.graph.nodes()[x]['pos'], self.graph.nodes()[y]['pos']):
+                self.graph.remove_edge(x, y)
+                self.collidingEdges.append((x, y))
                 return True
             else:
-                self.nonCollidingEdges.append((x,y))
-                                                                                          
-            
+                self.nonCollidingEdges.append((x, y))
+
         return False
 
     @IPPerfMonitor
@@ -120,7 +101,7 @@ class LazyPRM(PRMBase):
         self.collidingEdges = []
 
         # 1. check start and goal whether collision free (s. BaseClass)
-        checkedStartList, checkedGoalList = self._checkStartGoal(startList,goalList)
+        checkedStartList, checkedGoalList = self._checkStartGoal(startList, goalList)
 
         # 2. add start and goal to graph
         self.graph.add_node("start", pos=checkedStartList[0])
@@ -132,7 +113,7 @@ class LazyPRM(PRMBase):
         maxTry = 0
         while maxTry < config["maxIterations"]:
             try:
-                path = nx.shortest_path(self.graph,"start","goal")
+                path = nx.shortest_path(self.graph, "start", "goal")
             except:
                 self._buildRoadmap(config["updateRoadmapSize"], config["kNearest"])
                 maxTry += 1
@@ -141,9 +122,8 @@ class LazyPRM(PRMBase):
             if self._checkForCollisionAndUpdate(path):
                 continue
             else:
-                #print "Found solution"
+                # print "Found solution"
                 return path
 
         return []
 
-    

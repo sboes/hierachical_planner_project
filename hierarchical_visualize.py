@@ -17,8 +17,6 @@ def visualize_hierarchical_planning(planner, collision_checker, config_low, star
         nx.draw_networkx_nodes(planner.graph, pos_map, nodelist=['start'], node_color='limegreen', node_size=150, ax=ax1)
     if 'goal' in planner.graph.nodes:
         nx.draw_networkx_nodes(planner.graph, pos_map, nodelist=['goal'], node_color='crimson', node_size=150, ax=ax1)
-    if hasattr(collision_checker, "drawObstacles"):
-        collision_checker.drawObstacles(ax1)
 
     # === Plot 2: Subplanner-Pfade ===
     ax2 = axes[1]
@@ -32,9 +30,6 @@ def visualize_hierarchical_planning(planner, collision_checker, config_low, star
             print(f"⚠️ Fehler beim Pfad ({a} ↔ {b}): {e}")
     ax2.scatter(*start, color="limegreen", s=100, label="Start")
     ax2.scatter(*goal, color="crimson", s=100, label="Goal")
-    if hasattr(collision_checker, "drawObstacles"):
-        collision_checker.drawObstacles(ax2)
-    ax2.legend()
 
     # === Plot 3: Finaler Pfad ===
     ax3 = axes[2]
@@ -49,10 +44,6 @@ def visualize_hierarchical_planning(planner, collision_checker, config_low, star
         ax3.plot(xs, ys, color="blue", linewidth=2.5, label="Pfad")
         ax3.scatter(xs[0], ys[0], color="limegreen", s=100, label="Start")
         ax3.scatter(xs[-1], ys[-1], color="red", s=100, label="Ziel")
-
-    if hasattr(collision_checker, "drawObstacles"):
-        collision_checker.drawObstacles(ax3)
-    ax3.legend()
 
     # === Einheitliches Styling für alle ===
     for ax in axes:

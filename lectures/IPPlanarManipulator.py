@@ -18,7 +18,8 @@ class PlanarJoint:
         self.sym_a, self.sym_theta = sp.symbols(f'a_{id} theta_{id}')
         self.rot = sp.Matrix([[sp.cos(self.sym_theta), -sp.sin(self.sym_theta)],
                               [sp.sin(self.sym_theta), sp.cos(self.sym_theta)]])
-        self.trans = sp.Matrix([self.sym_a * sp.cos(self.sym_theta), self.sym_a * sp.sin(self.sym_theta)])
+        self.trans = sp.Matrix([self.sym_a * sp.cos(self.sym_theta),
+                                self.sym_a * sp.sin(self.sym_theta)])
         last_row = sp.Matrix([[0, 0, 1]])
         self.M = sp.Matrix.vstack(sp.Matrix.hstack(self.rot, self.trans), last_row)
 
@@ -33,9 +34,10 @@ class PlanarJoint:
 
 
 class PlanarRobot:
-    def __init__(self, n_joints=2):
+    def __init__(self, n_joints=2, total_length=3.0):
         self.dim = n_joints
-        self.joints = [PlanarJoint(id=i) for i in range(self.dim)]
+        a_per_joint = total_length / n_joints
+        self.joints = [PlanarJoint(a=a_per_joint, id=i) for i in range(self.dim)]
         self.Ms = [sp.eye(3)]
         for joint in self.joints:
             self.Ms.append(self.Ms[-1] * joint.M)
@@ -55,6 +57,31 @@ class PlanarRobot:
             self.joints[i].move(new_thetas[i])
 
 
+def generate_consistent_joint_config(dof, total_angle=1.85, curvature=0.45):
+    """
+    Generates a joint configuration that results in consistent shape
+    regardless of number of joints.
+
+    Args:
+        dof (int): number of joints
+        total_angle (float): the main direction angle (like the first joint)
+        curvature (float): the remaining angle to be spread among other joints
+
+    Returns:
+        list of joint angles
+    """
+    if dof < 2:
+        return [total_angle]
+
+    # First joint gets the "main direction" angle
+    first = total_angle
+
+    # Remaining joints split the curvature evenly
+    rest = [curvature / (dof - 1)] * (dof - 1)
+
+    return [first] + rest
+
+
 if __name__ == '__main__':
     j = PlanarJoint()
     print(j.get_transform())
@@ -65,6 +92,6 @@ if __name__ == '__main__':
     j.move(1.552)
     print(j.get_transform())
 
-    r = PlanarRobot()
-    r.move([0, 0.777])
+    r = PlanarRobot(n_joints=3, total_length=4.5)
+    r.move([0.5, 0.7, 1.2])
     print(r.get_transforms())
